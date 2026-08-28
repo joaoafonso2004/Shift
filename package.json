@@ -17,9 +17,9 @@
     "catalog:fetch": "node scripts/fetch-dataset.ts",
     "catalog:build": "node scripts/build-catalog.ts",
     "catalog": "npm run catalog:fetch && npm run catalog:build -- --strict",
-    "db:start": "supabase start",
-    "db:stop": "supabase stop",
-    "db:reset": "supabase db reset",
+    "db:start": "npx --yes supabase start",
+    "db:stop": "npx --yes supabase stop",
+    "db:reset": "npx --yes supabase db reset",
     "db:test": "node scripts/db-test.ts"
   },
   "dependencies": {

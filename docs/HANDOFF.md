@@ -19,7 +19,7 @@ npm run verify
 | `npm run typecheck` | TypeScript 6, strict, covers app + domain + scripts |
 | `npm run bundle:check` | Metro bundle for iOS — catches native-side breakage on any OS |
 | `npm run verify` | All three. **Run before declaring anything done.** |
-| `npm run db:start` | Local Supabase stack in Docker. First run pulls several GB |
+| `npm run db:start` | Local Supabase stack in Docker. Fetches the CLI through `npx`; the first run also pulls several GB of images |
 | `npm run db:test` | 38 row-level-security assertions against the real stack |
 | `npm run db:reset` | Re-apply every migration from scratch |
 | `npm run catalog` | Rebuild the exercise catalog from the upstream dataset |
