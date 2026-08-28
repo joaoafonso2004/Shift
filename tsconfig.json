@@ -1,0 +1,33 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    // Keeps the domain layer runnable under Node's native TypeScript stripping:
+    // no enums, no namespaces, no parameter properties.
+    "erasableSyntaxOnly": true,
+    "skipLibCheck": true,
+    // The build scripts and the test suite run on Node (node:sqlite, node:test),
+    // while the app runs on Hermes. Both type sets have to be present at once.
+    "types": ["node"],
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ]
+    }
+  },
+  "include": [
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "tests/**/*.ts",
+    "scripts/**/*.ts",
+    "*.d.ts",
+    "nativewind-env.d.ts"
+  ]
+}

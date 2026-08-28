@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "Shift",
+    "slug": "shift",
+    "scheme": "shift",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.shift.app",
+      "infoPlist": {
+        "CADisableMinimumFrameDurationOnPhone": true
+      }
+    },
+    "android": {
+      "package": "com.shift.app"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "newArchEnabled": true,
+            "deploymentTarget": "16.4"
+          }
+        }
+      ],
+      "expo-sqlite",
+      "expo-asset",
+      "expo-image"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

@@ -1,0 +1,186 @@
+import { DatabaseSync } from 'node:sqlite';
+import { mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+import type { CatalogExercise, SimilarityRow } from '../../src/domain/catalog.ts';
+
+const SCHEMA = `
+create table exercises (
+  id             text primary key,
+  name           text not null,
+  body_part      text not null,
+  raw_target     text not null,
+  raw_equipment  text not null,
+  target         text not null,
+  secondary      text not null,   -- JSON array of canonical muscles
+  variant_key    text not null,   -- media variants of one movement share this
+  pattern        text not null,
+  family         text not null,
+  plane          text not null,
+  load_type      text not null,
+  is_compound    integer not null,
+  is_unilateral  integer not null,
+  stability      integer not null,
+  skill          integer not null,
+  classification text not null,
+  image          text,
+  gif_url        text,
+  instructions   text,
+  attribution    text not null
+);
+create index idx_exercises_target      on exercises (target, pattern);
+create index idx_exercises_body_part   on exercises (body_part);
+create index idx_exercises_pattern     on exercises (pattern);
+create index idx_exercises_load_type   on exercises (load_type);
+create index idx_exercises_variant     on exercises (variant_key);
+
+create table exercise_similarity (
+  exercise_id text not null references exercises(id),
+  alt_id      text not null references exercises(id),
+  score       real not null,
+  rank        integer not null,
+  reason      text not null,      -- JSON
+  primary key (exercise_id, rank)
+);
+create index idx_sim_lookup on exercise_similarity (exercise_id, score desc);
+
+create table meta (key text primary key, value text not null);
+
+create virtual table exercises_fts using fts5(
+  id unindexed, name, target, equipment, tokenize = 'unicode61'
+);
+`;
+
+export interface EmitStats {
+  exercises: number;
+  similarityRows: number;
+  bytes: number;
+}
+
+/**
+ * Write the bundled SQLite asset.
+ *
+ * Ships with the app and is read-only at runtime. A swap therefore costs one
+ * indexed lookup rather than a network round trip, which is what lets the card
+ * ring be filled synchronously during mount (§4.4).
+ */
+export function emitSqlite(
+  path: string,
+  exercises: readonly CatalogExercise[],
+  similarity: readonly SimilarityRow[],
+  meta: Record<string, string>,
+): EmitStats {
+  mkdirSync(dirname(path), { recursive: true });
+  rmSync(path, { force: true });
+
+  const db = new DatabaseSync(path);
+  db.exec('pragma journal_mode = delete');
+  db.exec(SCHEMA);
+
+  const insertExercise = db.prepare(`
+    insert into exercises (id, name, body_part, raw_target, raw_equipment, target, secondary,
+      variant_key, pattern, family, plane, load_type, is_compound, is_unilateral, stability, skill,
+      classification, image, gif_url, instructions, attribution)
+    values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+  const insertFts = db.prepare(
+    'insert into exercises_fts (id, name, target, equipment) values (?,?,?,?)',
+  );
+  const insertSim = db.prepare(
+    'insert into exercise_similarity (exercise_id, alt_id, score, rank, reason) values (?,?,?,?,?)',
+  );
+  const insertMeta = db.prepare('insert into meta (key, value) values (?,?)');
+
+  db.exec('begin');
+  for (const e of exercises) {
+    insertExercise.run(
+      e.id, e.name, e.bodyPart, e.rawTarget, e.rawEquipment, e.target,
+      JSON.stringify(e.secondary), e.variantKey, e.pattern, e.family, e.plane, e.loadType,
+      e.isCompound ? 1 : 0, e.isUnilateral ? 1 : 0, e.stability, e.skill,
+      e.classification, e.image, e.gifUrl, e.instructions, e.attribution,
+    );
+    insertFts.run(e.id, e.name, e.target, e.rawEquipment);
+  }
+  for (const s of similarity) {
+    insertSim.run(s.exerciseId, s.altId, s.score, s.rank, JSON.stringify(s.reason));
+  }
+  for (const [k, v] of Object.entries(meta)) insertMeta.run(k, v);
+  db.exec('commit');
+
+  db.exec('vacuum');
+  db.exec('analyze');
+  db.close();
+
+  return {
+    exercises: exercises.length,
+    similarityRows: similarity.length,
+    bytes: statSync(path).size,
+  };
+}
+
+// ---------------------------------------------------------------------------
+
+function sql(value: string | null): string {
+  if (value === null) return 'null';
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+function sqlArray(values: readonly string[]): string {
+  if (values.length === 0) return `'{}'`;
+  return `'{${values.map((v) => `"${v.replace(/"/g, '\\"')}"`).join(',')}}'`;
+}
+
+/**
+ * Postgres seed for the same data.
+ *
+ * The bundled SQLite is the runtime source of truth; this exists so the matrix
+ * can be corrected server-side without shipping an app update (§2.1).
+ */
+export function emitPostgresSeed(
+  path: string,
+  exercises: readonly CatalogExercise[],
+  similarity: readonly SimilarityRow[],
+): number {
+  const out: string[] = [
+    '-- Generated by scripts/build-catalog.ts. Do not edit by hand.',
+    'begin;',
+    'truncate exercise_similarity, exercises restart identity cascade;',
+    '',
+  ];
+
+  const BATCH = 250;
+  for (let i = 0; i < exercises.length; i += BATCH) {
+    const values = exercises.slice(i, i + BATCH).map((e) =>
+      `(${[
+        sql(e.id), sql(e.name), sql(e.bodyPart), sql(e.rawTarget), sql(e.rawEquipment),
+        sql(e.target), sqlArray(e.secondary), sql(e.variantKey), sql(e.pattern), sql(e.family), sql(e.plane),
+        sql(e.loadType), e.isCompound, e.isUnilateral, e.stability, e.skill,
+        sql(e.classification), sql(e.image), sql(e.gifUrl), sql(e.instructions),
+        sql(e.attribution),
+      ].join(',')})`,
+    );
+    out.push(
+      'insert into exercises (id, name, body_part, raw_target, raw_equipment, target_canon,' +
+        ' secondary_canon, variant_key, movement_pattern, family, plane, load_type, is_compound,' +
+        ' is_unilateral, stability_demand, skill_level, classification, image, gif_url,' +
+        ' instructions, attribution) values',
+      values.join(',\n') + ';',
+      '',
+    );
+  }
+
+  for (let i = 0; i < similarity.length; i += BATCH) {
+    const values = similarity.slice(i, i + BATCH).map((s) =>
+      `(${sql(s.exerciseId)},${sql(s.altId)},${s.score},${s.rank},${sql(JSON.stringify(s.reason))}::jsonb)`,
+    );
+    out.push(
+      'insert into exercise_similarity (exercise_id, alt_id, score, rank, reason) values',
+      values.join(',\n') + ';',
+      '',
+    );
+  }
+
+  out.push('commit;');
+  const text = out.join('\n');
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, text, 'utf8');
+  return Buffer.byteLength(text);
+}

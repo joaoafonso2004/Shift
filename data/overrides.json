@@ -1,0 +1,11 @@
+{
+  "_readme": {
+    "note": "Hand corrections applied after rule classification, keyed by exercise id. Anything here is marked `override` in the catalog and counts toward rule coverage. Use this for cases the name rules cannot reach rather than adding an ever-narrower rule. Fields: pattern, isUnilateral, skill, note.",
+    "example": {
+      "0001": {
+        "pattern": "anti_extension",
+        "note": "why this was corrected — required, so the next audit knows"
+      }
+    }
+  }
+}

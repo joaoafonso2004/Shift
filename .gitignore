@@ -1,0 +1,17 @@
+node_modules/
+.expo/
+.expo-export-check/
+ios/
+android/
+*.tsbuildinfo
+
+# Cache dropped into the repo by an editor MCP server. Not part of Shift.
+docs/motion-docs.db
+
+# The 16.6 MB source dataset is fetched, not committed. Only the derived
+# catalog ships: assets/catalog.db and data/seed/catalog.sql.
+data/raw/
+
+# Supabase URL + anon key. Anon is public, but keep local config out of git.
+.env
+.env.local
