@@ -10,9 +10,9 @@ import {
   formatJoinCode,
   isValidJoinCode,
   JOIN_CODE_LENGTH,
-  joinCodeUrl,
   normalizeJoinCode,
 } from '../src/domain/joinCode.ts';
+import { squadLink } from '../src/data/links.ts';
 import { createSession, joinByCode, type SessionSummary } from '../src/data/session.ts';
 import { isSupabaseConfigured } from '../src/data/supabase.ts';
 import type { HapticGate } from '../src/motion/haptics.ts';
@@ -100,7 +100,9 @@ function SessionCard({ session }: { session: SessionSummary }) {
       </Text>
 
       <View className="rounded-2xl bg-chalk p-3">
-        <QRCode value={joinCodeUrl(session.joinCode)} size={148} backgroundColor="#f4f5f7" />
+        {/* Built for the runtime rather than hardcoded, so the code is
+            scannable from a development build as well as a shipped one. */}
+        <QRCode value={squadLink(session.joinCode)} size={148} backgroundColor="#f4f5f7" />
       </View>
 
       <View className="flex-row items-center gap-2">

@@ -24,6 +24,7 @@ npm run verify
 | `npm run db:reset` | Re-apply every migration from scratch |
 | `npm run catalog` | Rebuild the exercise catalog from the upstream dataset |
 | `npm run ios` | Device build. Needs macOS + Xcode + a physical iPhone |
+| `npm run start:go` | Expo Go. No Mac and no Apple account, but capped at 60 Hz |
 
 **`npm run verify` is the contract.** It runs on Windows, macOS, or Linux and catches everything except device behaviour. It deliberately does **not** include `db:test`, which needs Docker — keeping verify runnable anywhere is worth more than folding the two together.
 
@@ -66,6 +67,17 @@ npm run verify
 **120 fps has not been measured.** The scaffold verifies green — expo-doctor 20/20, `CADisableMinimumFrameDurationOnPhone` confirmed present in the *resolved* config, iOS bundle succeeds — but nobody has run it on hardware. A simulator reports its host display and means nothing.
 
 To close this out, on a physical iPhone 13 Pro or newer: `npm run ios`, open **Frame sentinel**, read the verdict (§4.0). Report the number and the load at which it degrades. Until then, treat "120 fps" as designed-for, not achieved.
+
+**Getting a build onto a phone, from Windows.** There is no Mac in this project's history, so `npm run ios` has never been available. The two routes:
+
+| | Expo Go (`npm run start:go`) | EAS development build |
+|---|---|---|
+| Cost | free | Apple Developer Program, ~€99/year |
+| Runs the app | yes — the only native modules are `react-native-svg` and `react-native-worklets`, both bundled in Expo Go | yes |
+| 120 Hz | **no.** Expo Go's Info.plist cannot carry `CADisableMinimumFrameDurationOnPhone`, so the frame sentinel reads 60 | yes, and this is the only way to read the number |
+| Deep links | yes, since `canonicalShiftUrl` accepts the `exp://` form | yes |
+
+Expo Go therefore closes everything on this list *except* the frame sentinel — the keyboard-free workout, swipe-to-swap, sharing, squads. The 120 Hz claim genuinely requires the paid account. `eas.json` is committed and ready; `npx eas-cli build --platform ios --profile development` is the command.
 
 ---
 

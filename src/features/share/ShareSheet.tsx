@@ -7,7 +7,8 @@ import { ensureIdentity } from '../../data/auth.ts';
 import { loadFriends, type FriendProfile } from '../../data/friends.ts';
 import { sendRoutine } from '../../data/shares.ts';
 import { isSupabaseConfigured } from '../../data/supabase.ts';
-import { encodeRoutineLink, type SharedRoutine } from '../../domain/sharing.ts';
+import { routineLink } from '../../data/links.ts';
+import type { SharedRoutine } from '../../domain/sharing.ts';
 import type { HapticGate } from '../../motion/haptics.ts';
 import { springs } from '../../motion/springs.ts';
 import { usePressScale } from '../../motion/usePressScale.ts';
@@ -143,7 +144,7 @@ export function ShareSheet({
 
   const shareLink = useCallback(async () => {
     if (!routine) return;
-    const link = encodeRoutineLink(routine);
+    const link = routineLink(routine);
     // The system sheet, so the routine goes wherever this person already talks:
     // WhatsApp, Messages, a note to themselves. `message` rather than `url`
     // because a custom scheme in the url field is dropped by some targets.

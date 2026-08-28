@@ -20,7 +20,8 @@
     "db:start": "npx --yes supabase start",
     "db:stop": "npx --yes supabase stop",
     "db:reset": "npx --yes supabase db reset",
-    "db:test": "node scripts/db-test.ts"
+    "db:test": "node scripts/db-test.ts",
+    "start:go": "expo start --go"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",

@@ -1,5 +1,7 @@
+import * as Linking from 'expo-linking';
 import { create } from 'zustand';
 
+import { canonicalShiftUrl } from '../domain/deepLink.ts';
 import { codeFromUrl } from '../domain/joinCode.ts';
 import { decodeRoutineLink, type SharedRoutine } from '../domain/sharing.ts';
 
@@ -34,21 +36,27 @@ export const useInbound = create<InboundState>((set) => ({
   squadCode: null,
 
   offerUrl: (url) => {
-    const routine = decodeRoutineLink(url);
+    // The scheme is discarded before anything else looks at the link, because
+    // it differs between a standalone build (`shift://`) and Expo Go
+    // (`exp://<packager>/--/`) and nothing downstream should have to care.
+    const canonical = canonicalShiftUrl(Linking.parse(url));
+    if (!canonical) return null;
+
+    const routine = decodeRoutineLink(canonical);
     if (routine) {
       set({ routine });
       return '/routines';
     }
 
-    const code = codeFromUrl(url);
+    const code = codeFromUrl(canonical);
     if (code) {
       set({ squadCode: code });
       return '/squad';
     }
 
-    // Anything else — a marketing link, a malformed paste, a scheme we do not
-    // own. Silently ignored: an error toast for a link the user did not
-    // knowingly open is noise.
+    // A link we address but cannot read — a truncated paste, a routine from a
+    // newer format. Silently ignored: an error toast for a link the user did
+    // not knowingly open is noise.
     return null;
   },
 

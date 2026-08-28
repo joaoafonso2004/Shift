@@ -396,7 +396,14 @@ export function adaptRoutine(routine: SharedRoutine, ctx: AdaptContext): Adapted
  */
 const LINK_PREFIX = 'shift://routine/';
 
-export function encodeRoutineLink(routine: SharedRoutine): string {
+/**
+ * Just the payload, without a scheme.
+ *
+ * Split out because the scheme is not the domain's business: a standalone build
+ * owns `shift://` and Expo Go does not own one at all, so the app layer builds
+ * the URL with `Linking.createURL` and only the encoding lives here.
+ */
+export function encodeRoutinePayload(routine: SharedRoutine): string {
   const body = routine.exercises
     .map((e) => [e.exerciseId, e.sets, e.reps, e.restS ?? ''].join(':'))
     .join(',');
@@ -408,7 +415,12 @@ export function encodeRoutineLink(routine: SharedRoutine): string {
     body,
   ].join('|');
 
-  return LINK_PREFIX + base64UrlEncode(payload);
+  return base64UrlEncode(payload);
+}
+
+/** The canonical form, for anywhere a runtime-specific scheme would be wrong. */
+export function encodeRoutineLink(routine: SharedRoutine): string {
+  return LINK_PREFIX + encodeRoutinePayload(routine);
 }
 
 export function decodeRoutineLink(url: string): SharedRoutine | null {
