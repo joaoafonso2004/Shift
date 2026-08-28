@@ -2,8 +2,8 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true,
-    "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
@@ -13,7 +13,9 @@
     "skipLibCheck": true,
     // The build scripts and the test suite run on Node (node:sqlite, node:test),
     // while the app runs on Hermes. Both type sets have to be present at once.
-    "types": ["node"],
+    "types": [
+      "node"
+    ],
     "paths": {
       "@/*": [
         "./src/*"
@@ -28,6 +30,27 @@
     "tests/**/*.ts",
     "scripts/**/*.ts",
     "*.d.ts",
-    "nativewind-env.d.ts"
+    "nativewind-env.d.ts",
+    // Written by expo-cli, and left exactly in the shape it wants. `expo start`
+    // rewrites this whole file whenever it finds one of its entries missing,
+    // and that pass strips every comment here — including the two above
+    // explaining `types` and `erasableSyntaxOnly`.
+    ".expo/types/**/*.ts",
+    "expo-env.d.ts"
+  ],
+  // `expo-env.d.ts` is listed above so expo-cli leaves the file alone, and
+  // excluded here so tsc never reads it. Both are needed; neither alone works.
+  //
+  // Its single line references `expo/types`, which pulls in react-native-web's
+  // style augmentations. Crossed with NativeWind's, the `style` prop of
+  // `Animated.View` stops accepting what `useAnimatedStyle` returns — 13 errors
+  // across every animated component in the app. Shift is an iOS app that has
+  // typechecked and bundled for its whole history without those typings, and a
+  // web type system is not worth 13 casts in the gesture layer.
+  //
+  // The root `*.d.ts` glob would pick the file up on its own, so removing it
+  // from `include` is not sufficient. This exclude is the load-bearing half.
+  "exclude": [
+    "expo-env.d.ts"
   ]
 }
