@@ -150,12 +150,20 @@ export async function respondToShare(id: string, state: 'accepted' | 'dismissed'
   const supabase = getSupabase();
   if (!supabase) return false;
 
-  const { error } = await supabase
+  // `.select()` is load-bearing, not decoration.
+  //
+  // The update policy's USING clause *filters* rather than raising: a share
+  // that has already been answered, or that belongs to someone else, is simply
+  // not visible to the statement. PostgREST reports no error and zero rows, so
+  // checking only `error` would report success for a write that did nothing.
+  // Asking for the rows back is the only way to know one was touched.
+  const { data, error } = await supabase
     .from('shared_routines')
     .update({ state, responded_at: new Date().toISOString() })
-    .eq('id', id);
+    .eq('id', id)
+    .select('id');
 
-  return !error;
+  return !error && (data?.length ?? 0) > 0;
 }
 
 /** Take back something you sent, provided they have not answered it. */

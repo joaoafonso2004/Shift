@@ -6,9 +6,10 @@
 -- outright, without the thing you received changing under you. Normalising it
 -- would make every share a live view of somebody else's mutable data.
 --
--- Nothing here can carry a load. `SharedExercise` in src/domain/sharing.ts has
--- no weight field, so there is none in the payload — invariant 13 holds by the
--- shape of the type rather than by a filter on the way out.
+-- Read `supabase/tests/rls.sql` alongside this file. Every claim made in a
+-- comment here is asserted there against a real Postgres, because the first
+-- draft of this migration made three claims that were not true and the parser
+-- was perfectly happy with all of them.
 
 -- The routine table predates the share format and only prescribed sets and
 -- rest. A shared routine prescribes reps too, and defaulting them at import
@@ -35,7 +36,22 @@ create table shared_routines (
   constraint shared_routines_payload_size
     check (length(payload::text) <= 8192),
   constraint shared_routines_message_length
-    check (message is null or length(message) <= 280)
+    check (message is null or length(message) <= 280),
+
+  -- Enough shape that a payload reaching an inbox is recognisably a routine.
+  --
+  -- This does **not** try to validate the whole schema — `parseSharedRoutine`
+  -- does that on the client, field by field, and is where a hostile payload is
+  -- actually made harmless. What this stops is the cheap nonsense: `'42'::jsonb`
+  -- posted straight to PostgREST, an empty exercise list, a version this build
+  -- cannot read. A v2 format will need this constraint widened, deliberately.
+  constraint shared_routines_payload_shape
+    check (
+      jsonb_typeof(payload) = 'object'
+      and payload->>'version' = '1'
+      and jsonb_typeof(payload->'exercises') = 'array'
+      and jsonb_array_length(payload->'exercises') between 1 and 24
+    )
 );
 
 -- The inbox query: everything pending, for me, newest first.
@@ -45,15 +61,54 @@ create index shared_routines_inbox_idx
 create index shared_routines_sent_idx
   on shared_routines (from_user_id, created_at desc);
 
--- The same routine cannot sit in someone's inbox twice.
+-- Stops a tap that fires twice, and the nuisance of one routine pushed at
+-- someone repeatedly while they have not answered.
 --
--- Sending again after they accepted or dismissed is fine — that is a person
--- choosing to resend. What this stops is a tap that fires twice, and the
--- nuisance case of the same routine pushed at someone repeatedly while they
--- have not answered.
+-- It is a fingerprint of the payload text, not of the routine's meaning: a
+-- sender who adds a junk field gets a different hash and a second row. That is
+-- a deliberate limit, not an oversight — deduplicating by meaning would need a
+-- canonical form of the payload, and the answer to somebody determined to spam
+-- you is the block button, which exists.
 create unique index shared_routines_pending_unique_idx
   on shared_routines (from_user_id, to_user_id, md5(payload::text))
   where state = 'pending';
+
+-- ---------------------------------------------------------------------------
+-- Privileges
+--
+-- These are load-bearing, and are the half of the protection that policies
+-- cannot provide.
+--
+-- A `WITH CHECK` clause is evaluated against the *proposed new row*. It has no
+-- access to the old one, so it cannot express "this column may not change" —
+-- an unmentioned column is simply unconstrained. The first draft of this file
+-- claimed the with-check pinned `from_user_id` and `payload`; it did not, and a
+-- recipient could rewrite an incoming share to look as though any user had sent
+-- them anything.
+--
+-- Column-level grants are the mechanism that actually makes a column
+-- immutable. Supabase grants ALL on public tables to `anon` and `authenticated`
+-- by default, so this starts by taking that back.
+-- ---------------------------------------------------------------------------
+
+revoke all on shared_routines from anon, authenticated;
+
+grant select on shared_routines to authenticated;
+
+-- `id`, `state`, `created_at` and `responded_at` are the server's to set. A
+-- client that could write `created_at` could post a share dated in the future
+-- and pin itself to the top of someone's inbox forever.
+grant insert (from_user_id, to_user_id, payload, message) on shared_routines to authenticated;
+
+-- Answering is all a recipient may do.
+grant update (state, responded_at) on shared_routines to authenticated;
+
+grant delete on shared_routines to authenticated;
+
+-- `revoke all` above also removes TRUNCATE, which `grant all` includes and
+-- which **row level security does not apply to**. PostgREST does not expose it,
+-- so this is not remotely reachable — but every other table in this schema is
+-- still in that position, and that is worth knowing rather than assuming.
 
 -- ---------------------------------------------------------------------------
 -- Row level security
@@ -79,18 +134,24 @@ create policy shared_routines_send on shared_routines
     from_user_id = auth.uid()
     and are_friends(to_user_id)
     and not is_blocked_with(to_user_id)
-    and state = 'pending'
   );
 
--- Only the recipient answers, and answering is all they may do: `from_user_id`,
--- `to_user_id` and `payload` are pinned by the with-check so an update cannot
--- rewrite what was sent or who sent it.
+-- One answer per share, given only by its recipient.
+--
+-- `state = 'pending'` in the using clause is what makes answering one-way.
+-- Without it a recipient can flip a share between accepted and dismissed
+-- indefinitely, and every flip is a write the sender can see.
 create policy shared_routines_respond on shared_routines
   for update to authenticated
-  using (to_user_id = auth.uid())
+  using (to_user_id = auth.uid() and state = 'pending')
   with check (to_user_id = auth.uid() and state in ('accepted', 'dismissed'));
 
--- The sender can withdraw one; the recipient can clear their own inbox.
+-- A recipient may clear anything from their own inbox. A sender may only
+-- withdraw something still unanswered — taking back a routine somebody already
+-- accepted would delete their evidence of where it came from.
 create policy shared_routines_delete on shared_routines
   for delete to authenticated
-  using (auth.uid() in (from_user_id, to_user_id));
+  using (
+    to_user_id = auth.uid()
+    or (from_user_id = auth.uid() and state = 'pending')
+  );

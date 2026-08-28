@@ -16,7 +16,11 @@
     "verify": "npm run typecheck && npm test && npm run check:migrations && npm run bundle:check",
     "catalog:fetch": "node scripts/fetch-dataset.ts",
     "catalog:build": "node scripts/build-catalog.ts",
-    "catalog": "npm run catalog:fetch && npm run catalog:build -- --strict"
+    "catalog": "npm run catalog:fetch && npm run catalog:build -- --strict",
+    "db:start": "supabase start",
+    "db:stop": "supabase stop",
+    "db:reset": "supabase db reset",
+    "db:test": "node scripts/db-test.ts"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",

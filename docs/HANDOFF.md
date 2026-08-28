@@ -19,10 +19,13 @@ npm run verify
 | `npm run typecheck` | TypeScript 6, strict, covers app + domain + scripts |
 | `npm run bundle:check` | Metro bundle for iOS — catches native-side breakage on any OS |
 | `npm run verify` | All three. **Run before declaring anything done.** |
+| `npm run db:start` | Local Supabase stack in Docker. First run pulls several GB |
+| `npm run db:test` | 38 row-level-security assertions against the real stack |
+| `npm run db:reset` | Re-apply every migration from scratch |
 | `npm run catalog` | Rebuild the exercise catalog from the upstream dataset |
 | `npm run ios` | Device build. Needs macOS + Xcode + a physical iPhone |
 
-**`npm run verify` is the contract.** It runs on Windows, macOS, or Linux and catches everything except device behaviour.
+**`npm run verify` is the contract.** It runs on Windows, macOS, or Linux and catches everything except device behaviour. It deliberately does **not** include `db:test`, which needs Docker — keeping verify runnable anywhere is worth more than folding the two together.
 
 ---
 
@@ -35,7 +38,8 @@ npm run verify
 | `src/motion/` — springs, frame sentinel, press scale, haptics, scrub, sortable, card ring | **Done, unverified on device.** Logic is tested; feel is not. |
 | `src/data/catalog.ts` — SQLite reader | **Done.** Bundled DB copied on first launch, versioned by build id. |
 | `src/data/localSchema.ts` + `repository.ts` — offline-first store and outbox | **Done and tested** against the real SQLite engine. |
-| `supabase/migrations/` — 8 migrations, 119 statements | **Written and syntax-checked.** Never applied to a real project. |
+| `supabase/migrations/` — 8 migrations | **Applied.** All eight run clean against Supabase's own Postgres 17 locally, and `data/seed/catalog.sql` loads 1,324 exercises and 15,888 similarity rows into them. Never applied to a *hosted* project. |
+| `supabase/tests/rls.sql` — row level security | **Done and passing.** 38 assertions, real roles, real `auth.uid()`. |
 | `src/data/supabase.ts`, `sync.ts` — client and outbox flush | **Written, never run.** No project, no credentials. |
 | `src/state/workout.ts` — session store (Zustand) | **Done.** Writes through to the local database. |
 | `app/` — home, `workout.tsx`, `proof.tsx` | **Solo player + swap work.** Prefilled sets, scrub-to-edit, tap-to-log, drag-reorder, swipe-to-swap. |
@@ -47,11 +51,11 @@ npm run verify
 | `src/domain/theme.ts` — 5 surfaces x 6 accents | **Done and tested.** All 30 pairings verified against WCAG AA. |
 | `src/domain/settings.ts`, `src/state/settings.ts`, `app/settings.tsx` | **Done and tested** (20 tests). UI unverified on device. |
 | `src/domain/friends.ts` — friendship state machine, handles, visibility | **Done and tested.** 32 tests. |
-| `supabase/migrations/0006_friends.sql` — friendships, avatars, reports | **Written and syntax-checked.** Never applied. |
+| `supabase/migrations/0006_friends.sql` — friendships, avatars, reports | **Applied and RLS-tested.** Friendship helpers, profile visibility and the avatar policies all behave as documented. |
 | `src/data/friends.ts`, `avatars.ts`, `app/friends.tsx` | **Written, never run.** Needs a live project and the `avatars` bucket. |
 | `src/domain/sharing.ts` — shared payload, parser, substitution, links | **Done and tested.** 26 tests. Pure, zero deps. |
 | `saved_routines` in `localSchema.ts` + repository | **Done and tested** (10 tests) against the real SQLite engine. |
-| `supabase/migrations/0008_sharing.sql` — `shared_routines` | **Written and syntax-checked.** Never applied. |
+| `supabase/migrations/0008_sharing.sql` — `shared_routines` | **Applied and RLS-tested.** Its first draft had three real holes; see the traps table. |
 | `src/data/shares.ts`, `routines.ts`, `ShareSheet`, `app/routines.tsx` | **Written, never run.** The link half works offline; the friend half needs a live project. |
 | `app/_layout.tsx` deep links + `src/state/inbound.ts` | **Written, unverified on device.** Needs a Dev Client build to test a real `shift://` open. |
 
@@ -120,6 +124,9 @@ These were each paid for once. Re-litigating them costs the same again.
 | Absolutely positioned sortable rows | The container has no intrinsic height. Set it explicitly: `sets.length * SET_ROW_HEIGHT`. |
 | `onStart` for press feedback | Waits ~130 ms for tap recognition. Use `onBegin`. |
 | Expo Go | **Cannot run this app.** Custom native modules and the 120 Hz key need a Dev Client build. |
+| `WITH CHECK` cannot pin a column | It is evaluated against the **new** row and cannot see the old one, so a column it does not mention is simply unconstrained. `0008` originally claimed the with-check pinned `from_user_id` and `payload`; a recipient could rewrite an incoming share to look as though anyone had sent them anything. **Column-level `GRANT UPDATE (col, …)` is the only thing that makes a column immutable.** |
+| `USING` filters, `WITH CHECK` raises | A row excluded by a USING clause is invisible to the statement, so the UPDATE or DELETE succeeds affecting zero rows. Any client reading only `error` is told it worked — which is exactly what `respondToShare` did before `.select()` was added to it. |
+| `grant all` includes TRUNCATE, and RLS does not apply to TRUNCATE | Not reachable through PostgREST, but true of every table here that still carries Supabase's default grants. |
 | An expo import inside `src/data/routines.ts` | `tests/workout.test.ts` imports `STARTER_ROUTINE`, and Node cannot resolve `expo-crypto`. The constant lives alone in `src/data/starterRoutine.ts` for exactly that reason — do not move it back. |
 | PowerShell `Get-Content \| Set-Content` on docs | Mangles UTF-8 into mojibake on Windows PowerShell 5.1. Edit files with the editor tools, not shell round-trips. |
 
@@ -195,10 +202,12 @@ Built: `src/domain/sharing.ts`, `supabase/migrations/0008_sharing.sql`, `saved_r
 - **Two ways out: a friend, or a link.** `shift://routine/<compact>` goes through any messenger and needs no account on either side, which is the only version of this that can also be an invite.
 - **Routines are device-local** and do not enter the outbox — see the comment above `saveRoutine`.
 
+**Done since:** the migration is applied and its policies are tested — `npm run db:test` asserts all of it, including that a stranger cannot be sent a routine, that a recipient cannot rewrite what they were sent, and that a sender cannot backdate a share to the top of someone's inbox. Three holes were found this way and closed in `0008`; the reasoning is in the file.
+
 **Remaining for step 8:**
 
-1. Push `0008` against a scratch project. The `md5(payload::text)` partial unique index and the four RLS policies are the parts most likely to need a fix.
-2. Two accounts, one friendship: send, accept, confirm the routine lands with the right substitutions and that a non-friend's insert is refused by the policy rather than by the client.
+1. Push `0008` against a *hosted* project. Local and hosted differ in extensions and defaults, so this is not the same test twice.
+2. Two accounts on two devices: send, accept, and confirm the substitutions land as the preview showed.
 3. On device, open a `shift://routine/…` link cold (app not running) and warm. The cold path is the one the navigation-state guard in `app/_layout.tsx` exists for.
 4. A reinstall loses locally-written routines. Decide whether that is worth a `routines` sync path or whether the server copy of a *received* routine is enough.
 

@@ -58,6 +58,23 @@ not a broken one.
 | `0007_discovery.sql` | Trigram search over handle and display name; `discoverable` becomes the single control over being found, photo included. |
 | `0008_sharing.sql` | `shared_routines` — sending a routine to a friend. Adds `routine_exercises.target_reps`. |
 
+## Running it locally
+
+```bash
+npm run db:start                       # Supabase in Docker. First run pulls several GB
+npm run db:test                        # 38 RLS assertions
+```
+
+`db:start` applies every migration on the way up, so a failure there is a real
+failure. Seed the catalog once it is running:
+
+```bash
+docker exec -i supabase_db_shift psql -U postgres -d postgres < ../data/seed/catalog.sql
+```
+
+`npm run db:reset` re-applies the migrations from scratch, which is what to run
+after editing one.
+
 ## Verification
 
 ```bash
@@ -80,10 +97,16 @@ through, so a real `db push` against a scratch project is still the last word.
   not a live view of the sender's data — theirs can change or be deleted and
   what you received does not move. The insert policy is where "only friends can
   send you things" is actually enforced; the client check is a courtesy.
-- The partial unique index on `shared_routines` uses `md5(payload::text)`. Both
-  the cast and md5 are immutable, so it is a legal index expression — but this
-  is exactly the sort of thing `check:migrations` cannot prove. Watch for it on
-  the first push.
+- The partial unique index on `shared_routines` uses `md5(payload::text)`.
+  Confirmed legal and working locally.
+- **A `WITH CHECK` clause cannot make a column immutable.** It sees only the
+  proposed new row, never the old one. Column-level `GRANT UPDATE (col, …)` is
+  the mechanism; `shared_routines` uses it, and `supabase/tests/rls.sql` proves
+  it. The first draft of `0008` got this wrong in a comment that read as though
+  it were true.
+- **A `USING` clause filters; it does not raise.** An UPDATE or DELETE against a
+  row the policy excludes reports success and zero rows. Clients must ask for
+  the affected rows back rather than trusting the absence of an error.
 - Realtime should carry ids and numbers, never objects. Four clients
   deserialising a fat payload mid-gesture is the JS-thread starvation risk in
   §4.7 of the architecture doc.
