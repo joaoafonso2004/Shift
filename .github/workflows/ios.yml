@@ -30,11 +30,25 @@ jobs:
 
   ipa:
     needs: verify
-    runs-on: macos-15
+    # macos-15 fails: one of React Native's SwiftPM dependencies declares Swift
+    # tools 6.2, and that image's default Xcode ships 6.1. Pinned rather than
+    # `macos-latest`, which moves under you the day GitHub repoints it.
+    runs-on: macos-26
     timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v4
+
+      # Belt and braces: the image ships several Xcodes and the selected one is
+      # not always the newest. Printing the versions means a future toolchain
+      # mismatch is one line in the log rather than a puzzle.
+      - name: Select the newest Xcode
+        run: |
+          XCODE=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
+          echo "Installed: $(ls -d /Applications/Xcode*.app | tr '\n' ' ')"
+          if [ -n "$XCODE" ]; then sudo xcode-select -s "$XCODE"; fi
+          xcodebuild -version
+          swift --version
 
       - uses: actions/setup-node@v4
         with:
