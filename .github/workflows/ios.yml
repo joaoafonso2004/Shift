@@ -1,0 +1,131 @@
+name: iOS build
+
+# Manual by default. A macOS runner bills at ten times the rate of a Linux one,
+# so a 20-minute build on every push would burn a month's free minutes in a
+# couple of days. Trigger it when there is something worth putting on a phone.
+on:
+  workflow_dispatch:
+    inputs:
+      configuration:
+        description: Xcode configuration
+        type: choice
+        options: [Release, Debug]
+        default: Release
+
+jobs:
+  # Everything that does not need a Mac runs on the cheap runner first, and the
+  # expensive job does not start unless this passes.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # typecheck + 303 tests + migration syntax + a Metro bundle for iOS.
+      # The bundle step is what catches native-side breakage without a Mac.
+      - run: npm run verify
+
+  ipa:
+    needs: verify
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # `expo prebuild` refuses to generate the iOS project on Windows, which is
+      # why this workflow exists at all. Here it works.
+      #
+      # Note what is *absent*: no EXPO_PUBLIC_SUPABASE_* variables. Those are
+      # inlined into the bundle at build time, so this produces an app in fully
+      # offline mode — workouts log locally, routine links work, squads and
+      # friends do not. To change that, add them as repository secrets and set
+      # them in the env of this step.
+      - name: Generate the native project
+        run: npx expo prebuild --platform ios --clean
+
+      - name: Cache CocoaPods
+        uses: actions/cache@v4
+        with:
+          path: ios/Pods
+          key: pods-${{ hashFiles('ios/Podfile.lock') }}
+          restore-keys: pods-
+
+      - run: npx pod-install
+
+      # The workspace and scheme are named after `expo.name` in app.json, and
+      # the exact sanitisation is Expo's business rather than something to
+      # hardcode and be wrong about later. Ask Xcode instead.
+      - name: Resolve workspace and scheme
+        id: xc
+        run: |
+          WORKSPACE=$(ls -d ios/*.xcworkspace | head -1)
+          SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list -json \
+            | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).workspace.schemes[0]))")
+          echo "workspace=$WORKSPACE" >> "$GITHUB_OUTPUT"
+          echo "scheme=$SCHEME" >> "$GITHUB_OUTPUT"
+          echo "Building $SCHEME from $WORKSPACE"
+
+      # Built without signing on purpose.
+      #
+      # Signing an iOS app needs a distribution certificate and a provisioning
+      # profile carrying the target device's UDID, and both require an Apple
+      # Developer Program membership. An unsigned .ipa is still exactly what a
+      # sideloading tool wants — Sideloadly and AltStore sign it themselves with
+      # a free Apple ID on the machine that installs it.
+      # No `| xcpretty`. Piping through a formatter needs `set -o pipefail` to
+      # keep a failure fatal, and a fallback that reruns the command on error
+      # would spend another twenty billed minutes reproducing a failure already
+      # in the log.
+      - name: Build (unsigned)
+        run: |
+          xcodebuild \
+            -workspace "${{ steps.xc.outputs.workspace }}" \
+            -scheme "${{ steps.xc.outputs.scheme }}" \
+            -configuration "${{ inputs.configuration }}" \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            ONLY_ACTIVE_ARCH=NO
+
+      # An .ipa is a zip with the .app inside a folder called Payload. That is
+      # the whole format — `xcodebuild -exportArchive` would do it too, but only
+      # with signing credentials, which is the thing being avoided here.
+      - name: Package the .ipa
+        run: |
+          APP=$(find build/Build/Products -maxdepth 2 -name "*.app" -type d | head -1)
+          test -n "$APP" || { echo "no .app produced"; exit 1; }
+          echo "Packaging $APP"
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -qry Shift.ipa Payload
+          ls -lh Shift.ipa
+
+      # Confirms the thing the whole project is designed around actually made it
+      # into the binary. It has never been read from a built app.
+      - name: Report the 120 Hz key
+        run: |
+          PLIST=$(find build/Build/Products -maxdepth 3 -name Info.plist | head -1)
+          echo "Info.plist: $PLIST"
+          /usr/libexec/PlistBuddy -c "Print :CADisableMinimumFrameDurationOnPhone" "$PLIST" \
+            || echo "MISSING — the 120 Hz key did not survive prebuild"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleURLTypes" "$PLIST" || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Shift-ipa-unsigned
+          path: Shift.ipa
+          retention-days: 14
