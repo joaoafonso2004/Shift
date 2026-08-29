@@ -108,7 +108,7 @@ jobs:
             -scheme "${{ steps.xc.outputs.scheme }}" \
             -configuration "${{ inputs.configuration }}" \
             -sdk iphoneos \
-            -derivedDataPath build \
+            -derivedDataPath "$GITHUB_WORKSPACE/build" \
             -destination 'generic/platform=iOS' \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
@@ -118,25 +118,47 @@ jobs:
       # An .ipa is a zip with the .app inside a folder called Payload. That is
       # the whole format — `xcodebuild -exportArchive` would do it too, but only
       # with signing credentials, which is the thing being avoided here.
+      # The .app is located rather than assumed. The first attempt at this
+      # hardcoded `build/Build/Products`, which was empty: a *relative*
+      # -derivedDataPath is resolved by xcodebuild against the workspace
+      # directory, not the working directory. The path is absolute now, and the
+      # search is wide enough that being wrong about it again is not fatal.
+      #
+      # `-not -path "*/*.app/*"` drops app bundles nested inside other bundles,
+      # which is how extensions and watch apps show up.
       - name: Package the .ipa
+        id: pack
         run: |
-          APP=$(find build/Build/Products -maxdepth 2 -name "*.app" -type d | head -1)
-          test -n "$APP" || { echo "no .app produced"; exit 1; }
+          APP=$(find "$GITHUB_WORKSPACE/build" ios/build -name "*.app" -type d \
+                     -not -path "*/*.app/*" 2>/dev/null | head -1)
+
+          if [ -z "$APP" ]; then
+            echo "No .app anywhere. Build output actually looks like this:"
+            find "$GITHUB_WORKSPACE" -maxdepth 5 -type d -name "Products" 2>/dev/null
+            exit 1
+          fi
+
           echo "Packaging $APP"
+          echo "app=$APP" >> "$GITHUB_OUTPUT"
+
+          # An .ipa is a zip with the bundle inside a folder called Payload.
+          # That is the entire format.
           mkdir -p Payload
           cp -R "$APP" Payload/
           zip -qry Shift.ipa Payload
           ls -lh Shift.ipa
 
-      # Confirms the thing the whole project is designed around actually made it
-      # into the binary. It has never been read from a built app.
+      # Confirms the thing this whole project is designed around actually made
+      # it into the binary. It has been verified in the resolved config and
+      # never once read out of a built app.
       - name: Report the 120 Hz key
         run: |
-          PLIST=$(find build/Build/Products -maxdepth 3 -name Info.plist | head -1)
-          echo "Info.plist: $PLIST"
+          PLIST="${{ steps.pack.outputs.app }}/Info.plist"
+          echo "== $PLIST"
           /usr/libexec/PlistBuddy -c "Print :CADisableMinimumFrameDurationOnPhone" "$PLIST" \
             || echo "MISSING — the 120 Hz key did not survive prebuild"
           /usr/libexec/PlistBuddy -c "Print :CFBundleURLTypes" "$PLIST" || true
+          /usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$PLIST" || true
 
       - uses: actions/upload-artifact@v4
         with:
