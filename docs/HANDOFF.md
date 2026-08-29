@@ -64,6 +64,10 @@ npm run verify
 
 ### The one thing that is not proven
 
+**120 fps has not been measured** on hardware. What *is* now settled: `.github/workflows/ios.yml` builds an unsigned .ipa on a GitHub macOS runner, and its step reads `CADisableMinimumFrameDurationOnPhone` back out of the built `Info.plist` — it is `true`. The key survives prebuild, so ProMotion is enabled in the binary. Whether the app holds 8.33 ms under load is still unknown, and only a phone can say.
+
+Original note follows.
+
 **120 fps has not been measured.** The scaffold verifies green — expo-doctor 21/21, iOS bundle succeeds, and the introspected config resolves `CADisableMinimumFrameDurationOnPhone: true`, the `shift` URL scheme and `NSPhotoLibraryUsageDescription` — but nobody has run it on hardware. Note what that last check is *not*: `expo prebuild` refuses to generate the iOS project on Windows, so the resolved config is as close as this machine can get. The generated `Info.plist` itself is still unread by anyone. A simulator reports its host display and means nothing.
 
 To close this out, on a physical iPhone 13 Pro or newer: `npm run ios`, open **Frame sentinel**, read the verdict (§4.0). Report the number and the load at which it degrades. Until then, treat "120 fps" as designed-for, not achieved.
