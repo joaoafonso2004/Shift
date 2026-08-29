@@ -77,15 +77,28 @@ jobs:
 
       - run: npx pod-install
 
-      # The workspace and scheme are named after `expo.name` in app.json, and
-      # the exact sanitisation is Expo's business rather than something to
-      # hardcode and be wrong about later. Ask Xcode instead.
+      # The scheme is the workspace's own name — Expo derives both from
+      # `expo.name`, so `Shift.xcworkspace` contains the `Shift` scheme.
+      #
+      # The first attempt took `schemes[0]` from `xcodebuild -list`, reasoning
+      # that asking Xcode beat hardcoding. That list is mostly CocoaPods
+      # targets, and it picked `EXConstants`: the build then succeeded, produced
+      # a static library, and left no .app to package. A build that compiles the
+      # wrong thing and exits zero is worse than one that fails, so the scheme
+      # is now checked against the list rather than drawn from it.
       - name: Resolve workspace and scheme
         id: xc
         run: |
           WORKSPACE=$(ls -d ios/*.xcworkspace | head -1)
-          SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list -json \
-            | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).workspace.schemes[0]))")
+          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
+
+          if ! xcodebuild -workspace "$WORKSPACE" -list \
+               | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -qx "$SCHEME"; then
+            echo "Scheme '$SCHEME' is not in this workspace. It offers:"
+            xcodebuild -workspace "$WORKSPACE" -list
+            exit 1
+          fi
+
           echo "workspace=$WORKSPACE" >> "$GITHUB_OUTPUT"
           echo "scheme=$SCHEME" >> "$GITHUB_OUTPUT"
           echo "Building $SCHEME from $WORKSPACE"
